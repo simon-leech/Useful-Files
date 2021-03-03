@@ -1,0 +1,951 @@
+---
+title: "Code Store"
+author: "Simon Leech"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true # table of content true
+    toc_float : true
+    toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    number_sections: true  ## if you want number sections at each table header
+    theme: united  # many options for theme, this one is my favorite.
+    highlight: tango  # specifies the syntax highlighting style
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read in libraries for use
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(GGally)
+library(explore)
+library(mice)
+library(imputeTS)
+library(tidyverse)
+library(readxl)
+library(reshape2)
+library(microsynth)
+library(biscale)
+library(sf)
+library(cowplot)
+library(data.table)
+```
+
+
+# Practicing Regression Modelling
+## Read in data and inital understanding
+```{r}
+weather<-read.csv("weatherHistory.csv")
+# display weather 
+head(weather)
+# Check for missing data
+sum(is.na(weather))
+# summary statistics
+summary(weather)
+# histogram of temperature
+weather %>% ggplot(aes(x=Temperature..C.)) + geom_histogram(bins=15, fill='skyblue', colour='red')
+# histogram of apparent temperature
+weather %>% ggplot(aes(x=Apparent.Temperature..C.)) + geom_histogram(bins=15, fill='black', colour='red')
+# histogram of humidity
+weather %>% ggplot(aes(x=Humidity)) + geom_histogram(bins=15, fill='green', colour='red')
+# histogram of wind speed
+weather %>% ggplot(aes(x=Wind.Speed..km.h.)) + geom_histogram(bins=15, fill='grey', colour='red')
+# histogram of wind bearing
+weather %>% ggplot(aes(x=Wind.Bearing..degrees.)) + geom_histogram(bins=15, fill='red', colour='red')
+#histogram of visibility
+weather %>% ggplot(aes(x=Visibility..km.)) + geom_histogram(bins=15, fill='purple', colour='red')
+```
+
+## Regression Modelling
+
+* Having created summary statistics and histograms for the datasets, now move on to regression modelling. 
+* Plot and fit a regression line to our data using the geom_smooth() layer. 
+* To do this we do using the binomial family to do a logistic regression, Gaussian family for continuous data, and Poisson for Count data. 
+
+## Linear Regression
+```{r fig.height=15, fig.width=15, message=FALSE, warning=FALSE}
+# Break data into test and train datasets (speeds up too!)
+test <- weather %>% sample_frac(0.05)
+train<-weather %>% sample_frac(0.05)
+
+# Remove categorical columns, not used as a predictor
+train = subset(train,select= -c(Formatted.Date, Summary, Loud.Cover, Daily.Summary))
+test = subset(test,select= -c(Formatted.Date, Summary, Loud.Cover, Daily.Summary))
+# Visualising relationship across variables 
+ggpairs(test, aes(alpha=0.4),upper = list(continuous = wrap("cor", size = 2)), progress=F)
+#Run the model
+model<- glm(Temperature..C.~., family=gaussian, data=train)
+summary(model)
+```
+
+## Understanding of Table above: 
+
+* Values will change as selecting random sample each time! 
+* *** indicates highly significant, likely to be Apparent Temperature, Humidity, Wind Speed, Pressure. 
+
+## Run Anova on the model to analyse the table of deviance
+```{r} 
+anova(model, test="Chisq")
+```
+
+## Understanding of ANOVA Table: 
+* Values will change as selecting random sample each time!
+* Check out the Deviance column- by adding additional variables the model performs better
+* Addition of Pressure make the model perform WORSE.
+* Large P-value such as  means the model without that variable more or less explains the same amount of variation. 
+
+## Plot the Temperature vs Wind Speed
+* Here we will use temperature, of continous data type and wind speed, of continuous data type. 
+* Make sure to plot value you're interested in on the Y-AXIS.
+* Does wind speed predict temperature?
+
+```{r message=FALSE, warning=FALSE}
+ggplot(weather, aes(x=Temperature..C., y=Wind.Speed..km.h.))+ 
+  geom_point() + 
+geom_smooth(method="glm", method.args=list(family="gaussian"))
+```
+
+## Plot the Temperature vs Humidity 
+* Here we will use temperature, of continous data type and Humidity, of continuous data type. 
+* Make sure to plot value you're interested in on the Y-AXIS.
+* Does humidity predict temperature?
+
+```{r message=FALSE, warning=FALSE}
+ggplot(weather, aes(x=Humidity, y=Temperature..C.))+ 
+  geom_point() + 
+geom_smooth(method="glm", method.args=list(family="gaussian"))
+```
+
+## Plot the Temperature vs Pressure
+* Here we will use temperature, of continous data type and Pressure, of continuous data type. 
+* Make sure to plot value you're interested in on the Y-AXIS.
+* Does humidity predict temperature?
+
+```{r message=FALSE, warning=FALSE}
+ggplot(weather, aes(x=Pressure..millibars., y=Temperature..C.))+ 
+  geom_point() + 
+geom_smooth(method="glm", method.args=list(family="gaussian"))
+```
+
+## Assessing the predictive ability of the model
+``` {r}
+# Predicting new values using the test dataset
+fitted.results <- predict(model,newdata=test, interval="confidence")
+meanvalue<- round(mean(test$Temperature..C.-fitted.results),3)
+summaryval <- test$Temperature..C.-fitted.results
+#Breakdown of the difference between predicted and actual temperature
+summary(summaryval)
+#Box plot of the moel fit
+ggplot(train, aes(y=summaryval, x="summaryval")) + 
+    geom_boxplot(fill="slateblue", alpha=0.2) + scale_y_continuous(breaks = seq(-4, 4, by=0.5), limits=c(-4,4)) + ylab("Actual-Predicted Temp")+ ggtitle("Difference in Actual and Predicted Temperature using Gaussian Model")+ theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+# Mean Difference
+print(paste('Mean difference in temperature between predicted and actual: ',meanvalue, 'C'))
+# Accuracy of the model, checking if its within 0.5 of true value.
+a<- between(fitted.results, (test$Temperature..C.-.5), (test$Temperature..C.+.5))
+# Sum the amount of times this is true.
+acc<- round(length(a[a==TRUE])/length(a)*100,3)
+print(paste("Accuracy (+-0.5 of true value):", acc, "%"))
+```
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+rm(weather, train, test, model, modelFit1, modelFit2, acc, a, fitted.results, meanvalue, summaryval)
+```
+
+# Data Inputation
+
+## First pass at the data
+```{r, fig.width=10, fig.height=20}
+# Check the data initially
+head(airquality)
+# Check for any null data, and where it is located
+which(is.na(airquality), arr.ind=TRUE)
+# Explore the datacolumns quickly
+airquality %>% explore_all()
+# Calculate the % missing vlaues in each column
+colMeans(is.na(airquality))*100
+```
+## Understanding location of null values
+```{r}
+#Brings up pattern of where missing data sits.
+md.pattern(airquality, plot=FALSE)
+```
+
+### md.pattern shows that (to read look for 1=TRUE and 0=FALSE): 
+* 111 complete samples
+* 35 samples missing only Ozone
+* 5 samples missing Solar.R 
+* 2 samples missing Solar.R and Ozone
+
+## Simple Mean Substitution
+``` {r} 
+# Example code to give null value the mean 
+# This does not alter mean (desirable) but reduces data variance
+# Using imputeTS package to give na values the mean
+airquality2<-imputeTS::na_mean(airquality)
+summary(airquality2)
+```
+## Imputing datasets
+```{r}
+# mice() function to imput data
+impdata <- mice(airquality,m=1,maxit=25,meth='pmm',seed=500)
+summary(impdata)
+```
+### Parameters used in mice imputation function: 
+* m=5 (default) refers to number of imputed datasets. Can increase if you want to test how well each performs.
+* meth='pmm' refers to imputation method, Predictive Mean Matching. 
+* methods(mice) for list of all available imputation methods. 
+
+## Check the imputed Airquality datasets
+```{r}
+airquality3<-complete(impdata,1)
+summary(airquality3)
+head(airquality3)
+nrow(airquality)
+nrow(airquality3)
+head(airquality)
+# This plot shows blue dots (observed data), and red dots (imputed missing data)
+xyplot(impdata,Ozone ~ Wind+Temp+Solar.R,pch=18,cex=1)
+# Check if shape of data is same for red dots (imputed missing data) and blue dots (observed data) 
+densityplot(impdata)
+# Check visual distribution of variables as individual points 
+stripplot(impdata,pch=20, cex=1.2)
+```
+
+
+## Check Similarity of Imputed Airquality Dataset 
+```{r}
+modelFit1<-with(airquality, lm(Temp~Ozone + Solar.R + Wind + Month + Day))
+modelFit2<-with(impdata, lm(Temp~Ozone + Solar.R + Wind + Month + Day))
+summary(modelFit1)
+summary(pool(modelFit2))
+```
+### Understanding lm table: 
+* Ozone variable significant (same as normal datasets)
+* Month variable significant (same as normal datasets)
+* Day variable significant (same as normal datasets)
+
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+rm(airquality, airquality2, airquality3, impdata, train, test, model, modelFit1, modelFit2, acc, a, fitted.results, meanvalue, summaryval)
+```
+
+# Data Linkage Practice
+## Merge Postcode data to LSOA via postcode to LSOA lookup
+```{r message=FALSE, warning=FALSE}
+# Read in Lookup for Postcode to LSOA 
+Lookup<-fread("PCD_OA_LSOA_MSOA_LAD_AUG19_UK_LU.csv")
+# Read in Test Postcode Level Data
+TestPost<-fread("Test.csv")
+# Subset Lookup to include only postcode and LSOA 
+LookupPost <- subset(Lookup, select=c("pcds", "lsoa11nm", "lsoa11cd"))
+# Rename POSTCODE column to pcds for merge
+#Remember to use it in this way, as doesn't matter if columns in diff order then!
+names(TestPost)[names(TestPost) == 'POSTCODE'] <- 'pcds'
+# Join TestPost to its LSOA (many Test Post to 1 LSOA)
+PostLSOA <- merge(TestPost, LookupPost, by="pcds")
+# Summarise data by LSOA 
+AggPostLSOA<- PostLSOA %>% group_by(lsoa11cd) %>% summarise(MeanCon=`Mean consumption (kWh)`)
+rm(Lookup, TestPost)
+```
+
+## Join Census LSOA Data via lsoa code
+```{r message=FALSE, warning=FALSE}
+#Read in the Mid-2019 Persons Estimates
+#Header in 5th row so skip first 4
+Census<-read_xlsx("Census.xlsx", sheet="Mid-2019 Persons", skip=4)
+#Rename column lsoa11cd to LSOA11CD for join
+#Remember to use it in this way, as doesn't matter if columns in diff order then!
+names(AggPostLSOA)[names(AggPostLSOA) == 'lsoa11cd'] <- 'LSOA11CD'
+# Join Postcode data with Census data using LSOA11CD
+PostCensus<- merge(AggPostLSOA, Census, by.x="LSOA11CD", by.y="LSOA Code")
+# Check for non-numeric and missing data in Census values
+which(!grepl('^[0-9]',PostCensus$`All Ages`:PostCensus$`90+`))
+rm(Census)
+``` 
+
+## Create Age Bins for Age Stratification
+```{r}
+# Creating A0-4 Bin
+PostCensus$A0to4<- PostCensus %>% dplyr::select(c('0':'4')) %>% rowSums()
+# Creating A5-14 Bin
+PostCensus$A5to14<- PostCensus %>% dplyr::select(c('5':'14')) %>% rowSums()
+# Creating A15-44 Bin 
+PostCensus$A15to44<- PostCensus %>% dplyr::select(c('15':'44')) %>% rowSums()
+# Creating 45-64 Bin 
+PostCensus$A45to64<- PostCensus %>% dplyr::select(c('45':'64')) %>% rowSums()
+# Creating 65-75 Bin 
+PostCensus$A65to74<- PostCensus %>% dplyr::select(c('65':'74')) %>% rowSums()
+# Creating 75-84 Bin 
+PostCensus$A75to84<- PostCensus %>% dplyr::select(c('75':'84')) %>% rowSums()
+# Creating 85+ Bin
+PostCensus$A85Over<- PostCensus %>% dplyr::select(c('85':'90+')) %>% rowSums()
+# Remove all individual age columns as have bands now 
+PostCensus=subset(PostCensus, select=-c(9:99))
+```
+
+## Creating Male Age Bins from Census Data
+```{r}
+#Read in Male Census Data and stratify sex by age
+CensusMales<-read_xlsx("Census.xlsx", sheet="Mid-2019 Males", skip=4)
+# Creating A0-4 Bin
+CensusMales$MA0to4<- CensusMales %>% dplyr::select(c('0':'4')) %>% rowSums()
+# Creating A5-14 Bin
+CensusMales$MA5to14<- CensusMales %>% dplyr::select(c('5':'14')) %>% rowSums()
+# Creating A15-44 Bin 
+CensusMales$MA15to44<- CensusMales %>% dplyr::select(c('15':'44')) %>% rowSums()
+# Creating 45-64 Bin 
+CensusMales$MA45to64<- CensusMales %>% dplyr::select(c('45':'64')) %>% rowSums()
+# Creating 65-75 Bin 
+CensusMales$MA65to74<- CensusMales %>% dplyr::select(c('65':'74')) %>% rowSums()
+# Creating 75-84 Bin 
+CensusMales$MA75to84<- CensusMales %>% dplyr::select(c('75':'84')) %>% rowSums()
+# Creating 85+ Bin
+CensusMales$MA85Over<- CensusMales %>% dplyr::select(c('85':'90+')) %>% rowSums()
+# Remove all individual age columns as have bands now 
+CensusMales <- CensusMales %>% 
+  dplyr::select("LSOA Code", "LSOA Name", "All Ages", MA0to4,MA5to14, MA15to44, MA45to64, MA65to74, MA75to84, MA85Over)
+```
+
+## Creating Female Age Bins from Census Data
+```{r}
+#Read in Female Census Data and stratify sex by age
+CensusFemales<-read_xlsx("Census.xlsx", sheet="Mid-2019 Females", skip=4)
+# Creating A0-4 Bin
+CensusFemales$FA0to4<- CensusFemales %>% dplyr::select(c('0':'4')) %>% rowSums()
+# Creating A5-14 Bin
+CensusFemales$FA5to14<- CensusFemales %>% dplyr::select(c('5':'14')) %>% rowSums()
+# Creating A15-44 Bin 
+CensusFemales$FA15to44<- CensusFemales %>% dplyr::select(c('15':'44')) %>% rowSums()
+# Creating 45-64 Bin 
+CensusFemales$FA45to64<- CensusFemales %>% dplyr::select(c('45':'64')) %>% rowSums()
+# Creating 65-75 Bin 
+CensusFemales$FA65to74<- CensusFemales %>% dplyr::select(c('65':'74')) %>% rowSums()
+# Creating 75-84 Bin 
+CensusFemales$FA75to84<- CensusFemales %>% dplyr::select(c('75':'84')) %>% rowSums()
+# Creating 85+ Bin
+CensusFemales$FA85Over<- CensusFemales %>% dplyr::select(c('85':'90+')) %>% rowSums()
+# Remove all individual age columns as have bands now 
+CensusFemales <- CensusFemales %>% 
+  dplyr::select("LSOA Code", "All Ages", FA0to4,FA5to14, FA15to44, FA45to64, FA65to74, FA75to84, FA85Over)
+```
+
+## Join Male and Female Breakdowns by Age into PostCensus Dataset
+```{r} 
+# Merge Male and Female Sets via LSOA code 
+CensusStrat <- merge(CensusMales, CensusFemales, by="LSOA Code")
+# Check the columns in CensusStrat 
+colnames(CensusStrat)
+
+# Merge CensusStrat (Male and Female data) with PostCensus 
+PostCensus<- merge(PostCensus, CensusStrat, by.x="LSOA11CD", by.y="LSOA Code")
+# Check the columns in PostCensus
+colnames(PostCensus)
+```
+
+## Synthetic Generation of Energy Consumption by Age
+
+```{r}
+# Subset for speed of creation 
+PostCensus <- PostCensus[!duplicated(PostCensus$LSOA11CD),]
+PostCensus <- PostCensus[1:1000, ]
+PostCensus<- PostCensus %>% 
+  rowwise() %>%
+  # create 7 split of MeanCon, store into list variable in PostCensus
+  mutate(listSplit=list(sample(PostCensus$MeanCon, 7))) %>% 
+  # split into separate columns
+  separate(col=listSplit, into=LETTERS[1:7], sep= ",") %>% 
+  #Remove c( from column A and ) from G 
+  mutate(A=gsub("c(", "", A, fixed="TRUE")) %>%
+  mutate(G=gsub(")", "", G, fixed="TRUE")) %>%
+  #Rename columns to give context
+  rename(EnergyA0to4=A, EnergyA5to14=B, EnergyA15to44=C, EnergyA45to64=D, EnergyA65to74=E, Energy75to84=F, Energy85Over=G)
+```
+
+## Assign Energy split by Sex and Age 
+```{r}
+#Calculate energy used by Age and by Sex MALE
+# Split data returned as characters 
+sapply(PostCensus, class)
+#Check column numbers to alter to numeric
+ncol(PostCensus)
+#Alter PostCensus final 7 columns to numeric
+PostCensus[, 32:39] <- sapply(PostCensus[, 32:39], as.numeric)
+
+PostCensus$MEnergyA0to4 <- (PostCensus$EnergyA0to4 * (PostCensus$MA0to4/(PostCensus$MA0to4 + PostCensus$FA0to4)))
+PostCensus$MEnergyA5to14 <- (PostCensus$EnergyA5to14 * (PostCensus$MA5to14/(PostCensus$MA5to14 + PostCensus$FA5to14)))
+PostCensus$MEnergyA15to44 <- (PostCensus$EnergyA15to44 * (PostCensus$MA15to44/(PostCensus$MA15to44 + PostCensus$FA15to44)))
+PostCensus$MEnergyA45to64 <- (PostCensus$EnergyA45to64 * (PostCensus$MA45to64/(PostCensus$MA45to64 + PostCensus$FA45to64)))
+PostCensus$MEnergyA65to74 <- (PostCensus$EnergyA65to74 * (PostCensus$MA65to74/(PostCensus$MA65to74 + PostCensus$FA65to74)))
+PostCensus$MEnergyA75to84 <- (PostCensus$Energy75to84 * (PostCensus$MA75to84/(PostCensus$MA65to74 + PostCensus$FA65to74)))
+PostCensus$MEnergyA85Over <- (PostCensus$Energy85Over * (PostCensus$MA85Over/(PostCensus$MA85Over + PostCensus$FA85Over)))
+
+#Calculate energy used by Age and by Sex FEMALE
+PostCensus$FEnergyA0to4 <- (PostCensus$EnergyA0to4- PostCensus$MEnergyA0to4)
+PostCensus$FEnergyA5to14 <- (PostCensus$EnergyA5to14- PostCensus$MEnergyA5to14)
+PostCensus$FEnergyA15to44 <- (PostCensus$EnergyA15to44- PostCensus$MEnergyA15to44)
+PostCensus$FEnergyA45to64 <- (PostCensus$EnergyA45to64- PostCensus$MEnergyA45to64)
+PostCensus$FEnergyA65to74 <- (PostCensus$EnergyA65to74- PostCensus$MEnergyA65to74)
+PostCensus$FEnergyA75to84 <- (PostCensus$Energy75to84- PostCensus$MEnergyA75to84)
+PostCensus$FEnergyA85Over <- (PostCensus$Energy85Over- PostCensus$MEnergyA85Over)
+```
+## Normalise Age Split Data to Per 100k Scale
+```{r}
+# Divide value by All ages to give individual usage, then multiply by 100000
+PostCensus$NEnergyA0to4 <- (PostCensus$EnergyA0to4/PostCensus$`All Ages`) *100000
+PostCensus$NEnergyA5to14 <- (PostCensus$EnergyA5to14/PostCensus$`All Ages`) *100000
+PostCensus$NEnergyA15to44 <- (PostCensus$EnergyA15to44/PostCensus$`All Ages`) *100000
+PostCensus$NEnergyA45to64 <- (PostCensus$EnergyA45to64/PostCensus$`All Ages`) *100000
+PostCensus$NEnergyA65to74 <- (PostCensus$EnergyA65to74/PostCensus$`All Ages`) *100000
+PostCensus$NEnergyA75to84 <- (PostCensus$Energy75to84/PostCensus$`All Ages`) *100000  
+PostCensus$NEnergyA85Over <- (PostCensus$Energy85Over/PostCensus$`All Ages`) *100000
+```
+
+## Normalise Age and Sex Split Data to Per 100k Scale
+```{r}
+# Divide value by All Ages and Sex to give individual usage, then multiply by 100000
+PostCensus$NMEnergyA0to4 <- (PostCensus$MEnergyA0to4/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA5to14 <- (PostCensus$MEnergyA5to14/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA15to44 <- (PostCensus$MEnergyA15to44/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA45to64 <- (PostCensus$MEnergyA45to64/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA65to74 <- (PostCensus$MEnergyA65to74/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA75to84 <- (PostCensus$MEnergyA75to84/PostCensus$`All Ages`) *100000
+PostCensus$NMEnergyA85Over <- (PostCensus$MEnergyA85Over/PostCensus$`All Ages`) *100000
+
+PostCensus$NFEnergyA0to4 <- (PostCensus$FEnergyA0to4/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA5to14 <- (PostCensus$FEnergyA5to14/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA15to44 <- (PostCensus$FEnergyA15to44/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA45to64 <- (PostCensus$FEnergyA45to64/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA65to74 <- (PostCensus$FEnergyA65to74/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA75to84 <- (PostCensus$FEnergyA75to84/PostCensus$`All Ages`) *100000
+PostCensus$NFEnergyA85Over <- (PostCensus$FEnergyA85Over/PostCensus$`All Ages`) *100000
+```
+
+## Plot Graph of Energy Usage per 100k Age Split
+```{r}
+#Subset data to plot
+Agesplit <- PostCensus %>% dplyr::select(c("LSOA11CD", "NEnergyA0to4": "NEnergyA85Over")) 
+Agesplitset <- Agesplit[sample(nrow(Agesplit), 5), ]
+
+# GATHER NEEDED IN GGPLOT, USE -VARIABLE FOR ONE TO GROUP BY
+ggplot(data = Agesplitset %>% gather(variable, value, -LSOA11CD), 
+       aes(x = LSOA11CD, y = value, fill = variable)) + 
+    geom_bar(stat = 'identity', position = 'dodge') + ggtitle("Energy Consumption per 100k Population by Age Bands by LSOA") +
+  xlab("Local Authority Code") + ylab("Energy Usage per 100k Population") +scale_fill_brewer(palette="Accent", labels=c("0 to 4 Years Old","5 to 14 Years Old", "15 to 44 Years Old", "45 to 64 Years Old", "65 to 74 Years Old", "75 to 84 Years Old", "85+ Years Old")) + labs(fill = "Energy per 100k Population")
+```
+
+
+## Stacked Bars Plot
+```{r}
+# To do this just remove, position=dodge from the geom_bar argument
+ggplot(data = Agesplitset %>% gather(variable, value, -LSOA11CD), 
+       aes(x = LSOA11CD, y = value, fill = variable)) + 
+    geom_bar(stat = 'identity') + ggtitle(" Proportion of Energy Consumption per 100k Population by Age Bands") +
+  xlab("Local Authority Code") + ylab("Energy Usage per 100k Population") +scale_fill_brewer(palette="Accent", labels=c("0 to 4 Years Old","5 to 14 Years Old", "15 to 44 Years Old", "45 to 64 Years Old", "65 to 74 Years Old", "75 to 84 Years Old", "85+ Years Old")) + labs(fill = "Energy per 100k Population") 
+```
+
+## Proportional Stacked Bars Plot (Useful for comparison of age bands!)
+```{r}
+# To do this add position="fill" to geom_bar argument
+ggplot(data = Agesplitset %>% gather(variable, value, -LSOA11CD), 
+       aes(x = LSOA11CD, y = value, fill = variable)) + 
+    geom_bar(stat = 'identity', position="fill") + ggtitle(" Proportion of Energy Consumption per 100k Population by Age Bands") +
+  xlab("Local Authority Code") + ylab("Energy Usage per 100k Population") +scale_fill_brewer(palette="Accent", labels=c("0 to 4 Years Old","5 to 14 Years Old", "15 to 44 Years Old", "45 to 64 Years Old", "65 to 74 Years Old", "75 to 84 Years Old", "85+ Years Old")) + labs(fill = "Energy per 100k Population") 
+```
+
+## Facet for Each Age Band 
+```{r fig.height=10, fig.width=15}
+ggplot(data = Agesplitset %>% gather(variable, value, -LSOA11CD), 
+       aes(x = LSOA11CD, y = value, fill = variable)) + 
+    geom_bar(stat = 'identity') + ggtitle("Energy Consumption per 100k Population by Age Bands by LSOA") +
+  ylab("Energy Usage per 100k Population") +scale_fill_brewer(palette="Accent", labels=c("0 to 4 Years Old","5 to 14 Years Old", "15 to 44 Years Old", "45 to 64 Years Old", "65 to 74 Years Old", "75 to 84 Years Old", "85+ Years Old")) + labs(fill = "Energy per 100k Population") + facet_wrap(.~variable, scales="fixed")+theme(legend.position = "none", axis.title.x=element_blank())
+```
+
+
+## Plot Graph of Energy Usage per 100k Age and Sex Split
+```{r}
+#Subset data to plot
+Agesexsplit <- PostCensus %>% dplyr::select(c("LSOA11CD", "NMEnergyA0to4": "NFEnergyA85Over")) 
+Agesexsplitset <- Agesexsplit[sample(nrow(Agesplit), 5), ]
+
+# GATHER NEEDED IN GGPLOT, USE -VARIABLE FOR ONE TO GROUP BY
+ggplot(data = Agesexsplitset %>% gather(variable, value, -LSOA11CD), 
+       aes(x = LSOA11CD, y = value, fill = variable)) + 
+    geom_bar(stat = 'identity', position = 'dodge')+ ggtitle("Energy Consumption per 100k Population by Age-Sex Bands by LSOA") +
+  xlab("Local Authority Code") + ylab("Energy Usage per 100k Population") +scale_colour_manual(labels=c("Male 0 to 4 Years Old","Male 5 to 14 Years Old", "Male 15 to 44 Years Old", "Male 45 to 64 Years Old", "Male 65 to 74 Years Old", "Male 75 to 84 Years Old", "Male 85+ Years Old" ,"Female 0 to 4 Years Old","Female 5 to 14 Years Old", "Female 15 to 44 Years Old", "Female 45 to 64 Years Old", "Female 65 to 74 Years Old", "Female 75 to 84 Years Old", "Female 85+ Years Old")) + labs(fill = "Energy per 100k Population") 
+
+
+
+```
+
+
+## Reshape the data from wide to long
+
+```{r message=FALSE, warning=FALSE}
+Agesexsplitset2 <- Agesexsplitset
+colnames(Agesexsplitset2) <- c("LSOA11CD", "NEnergyA0to4", "NEnergyA5to14", "NEnergyA15to44", "NEnergyA45to64" ,"NEnergyA65to74" ,"NEnergyA75to84" ,"NEnergyA85Over","NEnergyA0to4", "NEnergyA5to14", "NEnergyA15to44", "NEnergyA45to64" ,"NEnergyA65to74" ,"NEnergyA75to84" ,"NEnergyA85Over")
+
+agesexsplitset.long<-melt(Agesexsplitset)
+agesexsplitset.long$Gender <- substr(agesexsplitset.long$variable, 1, 3) # Create gender variable
+agesexsplitset.long$Gender[agesexsplitset.long$Gender=="NME"]<-"Male" # assign to male
+agesexsplitset.long$Gender[agesexsplitset.long$Gender=="NFE"]<-"Female" # assign to female 
+
+agesexsplitset.long$Name <- substr(agesexsplitset.long$variable,3,20)# Create Variable name across Genders 
+
+```
+
+## Proportion of Energy Consumption by Each Gender
+```{r}
+
+ggplot() + 
+    geom_bar(data = agesexsplitset.long, aes(x = LSOA11CD, y = value, fill = Gender), stat = 'identity', position="fill")+ ggtitle("Energy Consumption per 100k Population by Gender by LSOA") + xlab("Local Authority Code") + ylab("Energy Usage per 100k Population") 
+```
+
+
+
+
+## Faceted plot for each Gender
+```{r}
+ggplot() + 
+    geom_bar(data = agesexsplitset.long, aes(x = LSOA11CD, y = value, fill=Name), color="white", stat = 'identity', position="fill", width=0.5) + facet_wrap(.~Gender) + theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+
+
+
+## Facet for Each Age Band and Sex
+```{r fig.height=10, fig.width=15}
+ggplot(data = agesexsplitset.long, 
+       aes(x = LSOA11CD, y = value, fill = Name)) + 
+    geom_bar(stat = 'identity') + ggtitle("Energy Consumption per 100k Population by Age Bands by LSOA") +
+  ylab("Energy Usage per 100k Population") + facet_grid(Gender~Name, scales="fixed")+theme(legend.position = "none", axis.title.x=element_blank(), axis.text.x = element_text(angle = 90))
+```
+
+
+## Stacked side-by-side by Gender, Sex and LSOA
+```{r}
+# Stacked side-by-side by Gender, Sex and LSOA
+ggplot() + 
+    geom_bar(data = agesexsplitset.long, aes(x = interaction(Gender, LSOA11CD), y = value, fill=Name), color="white", stat = 'identity', position="fill", width=0.5) + theme(axis.text.x = element_text(angle = 90)) + xlab("Sex by Local Authority Code") + ylab("Proportion of Energy Consumption by Age Band") + ggtitle("Energy Consumption Stratified by Gender And Age by LSOA")+ labs(fill="Age Bands")
+
+```
+
+
+
+# Using microsynth to evaluate a Drug Market Intervention 
+
+Using "seattledmi" dataset provided with microsynth package, this code will: 
+
+* Evaluate Drug Market Intervention 
+* Intervention applied to 39 blocks (treatment cases)
+* Remaining 9603 blocks (without intervention) are comparison units
+* Using Data for block-level Census demographics and incidences of crime reported by the Seattle Police Department. 
+
+```{r message=FALSE, warning=FALSE}
+# install and load package 
+cat("Columns found in seattledmi dataset:")
+cat("\n")
+cat(colnames(seattledmi), sep="\n")
+# set seed to ensure reproducibility
+set.seed(99199)
+```
+
+
+We are going to detect whether the program was effective at reducing the incidence of crime in those 39 blocks where intervention was applied. 
+
+First we will specify the mandatory minimum parameters pursuant to the dataset and our basic research design. 
+
+## Setting ID Columns 
+
+Synthetic controls compares observation between treatment (intervention) areas versus control areas, with observations for each unit over a certain period of time. 
+
+Therefore, microsynth requires we identify: 
+
+* The `idvar` - ID variable (set as `ID`- Census block level observations)
+* The `timevar` - Time variable (set as `time` - quarterly observations)
+* The `intvar`- Intervention variable (set as `Intervention`- binary 0 for no, 1 for yes)
+
+
+```{r}
+idvar= "ID"
+timevar="time"
+intvar= "Intervention"
+```
+
+## Setting time parameters 
+Specify parameters relating to: 
+
+* the beginning of the pre-intervention data (`start.pre`- start of dataset)
+* the last time period of pre-intervention period (`end.pre`- 12 quarters in)
+* the time through post-intervention effects should be estimated (`end.post`- study for four quarters= 16) 
+
+```{r}
+end.pre= 12 
+end.post = 16
+
+```
+## Setting outcome variables, covariates and related parameters
+
+* Last group of mandatory parameters relate to declaring outcome variables and covariates. 
+* Both outcomes and covariates will be used to match treatment units to synthetic controls during the pre-intervention period. 
+* Key difference between outcomes and covariates is that outcomes variables are required to be time-variant, and convariates to be time-invariant (constant overtime). 
+
+Specifically we are interested in effect of Drug Market Intervention on: 
+
+* felony arrests (pass into `match.out`)
+* misdemeanor arrests (pass into `match.out`)
+* drug arrests (pass into `match.out`)
+* any criminal arrest (pass into `match.out`). 
+
+```{r}
+match.out <- c("i_felony", "i_misdemea", "i_drugs", "any_crime")
+```
+If we then assign `result.var=match.out` then the microsynth will identify these variables are outcome variables for which we would like effects to be estimated, `omnibus.var` will include them in the omnibus statistic. 
+
+Treatment and synthetic control will also be matched on block-level Census demographic data (all variables set to `match.covar`): 
+
+* Each block's population 
+* Each block's black residents 
+* Each block's hispanic residents
+* Each block's males aged 15-21 
+* Each block's number of households 
+* Each block's number of families per household
+* Each block's number of female-led households
+* Each block's number of rental households
+* Each block's number of vacant houses 
+
+```{r}
+cov.var <- c("TotalPop", "BLACK", "HISPANIC", "Males_1521", "HOUSEHOLDS", 
+             "FAMILYHOUS", "FEMALE_HOU", "RENTER_HOU", "VACANT_HOU")
+```
+
+## Example 1: Barebones results 
+
+In this example, we will calculate and display results in the simplest way possible. Including: 
+
+* Calculate weights to match treamtnet to synthetic control on variables specified
+* Calculate a variance estimate based on the linearization method, running a one-sided lower significance test (`test=lower`) 
+* Creating a plot and displaying it as output (`plot_microsynth()`), to save to file, specify a `.csv` or `.xlsx` as the `file` argument.
+* Estimating results but not saving it to file (`result.file-NULL`). Instead results can be viewed by inspecting the `microsynth` object. 
+
+As microsynth runs, it will display output relating to the calculation of weights, the matching of treatment to synthetic control, and the calculation of survey statistics (variance estimator). 
+
+First table will summarise the matching properties after applying the main weights: 
+
+* Characteristics of the treated areas for the time-variant and time-invariant variables. 
+* Characteristics of the synthetic control
+* characteristics of the entire population. 
+* IF example is successful in creating a matching synthetic control, the first column and second column will be nearly equal. 
+
+```{r}
+
+seal <- microsynth(seattledmi, #dataset
+                   idvar=idvar, #set to idvar generated above
+                   timevar=timevar, #set to timevar generated above
+                   intvar=intvar,  #set to intvar generated above
+                   start.pre=1,  #set to start of dataset
+                   end.pre=end.pre,  #set to end.pre generated above
+                   end.post=end.post, #set to end.post generated above
+                   match.out=match.out,  #set to match.out generated above
+                   match.covar=cov.var, # set to cov.var generated above
+                   result.var=match.out, #set to match.out generated above
+                   omnibus.var=match.out, #set to match.out generated above
+                   test="lower", # set to one-sided significance
+                   n.cores=min(parallel::detectCores(),2)) #run parallel 
+
+```
+
+
+```{r}
+plot_microsynth(seal)
+
+```
+
+The plots above are produced using default settings. 
+By default, plots will include one row for each variable passed to result.var in the original call. 
+Values for `start.pre` and `end.pre` and `end.post` can be automatically detected from the original object. 
+
+First plot compares the observed outcomes among the treatment, synthetic control and population during the pre-intervention and post-intervention periods: 
+
+* Dotted red line indicates the last time period of the pre-intervention period (`end.pre`) 
+* As matching was successful, treatment and synthetic control lines track closely during the pre-intervention period, and their divergence post-intervention represents an estimate of the causal effect of the program. 
+
+Second plot shows the difference after the post-intervention period (effect of the intervention). 
+
+## Example 2: Adding Permutations and Jackknife 
+
+In addition to using linearisation to calculate a variance estimate, microsynth can approximate the estimator's sampling distribution by generating permuted placebo groups. 
+
+When dealing with a large number of treatment and control units, there is a near infinite number of potential permutations. 
+
+For each placebo, weights are calculated to match the placebo treatments to a new synthetic control, and an effect is estimated, generating a sampling distribution and corresponding p-value. 
+
+We can also generate jackknife replication groups, using as many groups as the lesser of the number of cases in teh treatment or number of cases in the control group (`jack=TRUE`).
+
+This displays the estimated treatment effect in the context of the estimator's sampling distribution. 
+CODE SHOWN BELOW PERFORMS THIS FUNCTION.
+
+```{r}
+seal2 <- microsynth(seattledmi, #dataset
+ idvar=idvar, #set to idvar generated above
+ timevar=timevar, #set to timevar generated above
+ intvar=intvar,  #set to intvar generated above
+ start.pre=1,  #set to start of dataset
+ end.pre=end.pre,  #set to end.pre generated above
+end.post=end.post, #set to end.post generated above
+ match.out=match.out,  #set to match.out generated above
+ match.covar=cov.var, # set to cov.var generated above
+ result.var=match.out, #set to match.out generated above
+ omnibus.var=match.out, #set to match.out generated above
+ test="lower", # set to one-sided significance
+ perm=250, jack=TRUE, #set permutations to 250 for placebo treatments, set jack to TRUE (jacknife replication groups)
+ n.cores=min(parallel::detectCores(),2)) #run parallel
+```
+
+```{r}
+plot_microsynth(seal2)
+
+```
+
+In these plots, the estimated effect under each of the placebo treatments (grey lines) will be shown along with the estimated effect of the real treatment. 
+
+
+
+
+
+# Bivariate Mapping in R
+## Read in Datasets and Libraries for Bivariate Code
+
+```{r}
+# Read in AHAH dataset, IMD, IUC dataset for Leeds
+AHAH <- read.csv("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\Access_to_Healthy_Assets_and_Hazards_AHAH_E08000035\\data\\Access_to_Healthy_Assets_and_Hazards_AHAH\\Local_Authority_Districts\\E08000035\\tables\\E08000035.csv")
+
+IMD <- read.csv("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\Index_of_Multiple_Deprivation_IMD_E08000035\\data\\Index_of_Multiple_Deprivation_IMD\\Local_Authority_Districts\\E08000035\\tables\\E08000035_2019.csv")
+
+IUC <- read.csv("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\Internet_User_Classification_E08000035\\data\\Internet_User_Classification\\Local_Authority_Districts\\E08000035\\tables\\E08000035.csv")
+
+# Read in LSOA Shapefiles 
+LSOA <- read_sf(dsn="C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS", layer="Lower_Layer_Super_Output_Area__December_2011__EW_BSC_V2")
+
+# Read in population density and LA Name Data
+pop <- read_excel("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\sape22dt11mid2019lsoapopulationdensity\\SAPE22DT11-mid-2019-lsoa-population-density.xlsx", sheet=4, skip=4)
+
+# Read in LA Names with LSOA link code 
+LA <- read.csv("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\LSOA_LA.csv")
+LA<-LA[,c(4,5,10,11)] #Subset to keep just LSOA and LA data
+
+# Join pop to LSOA Shapefile
+LSOA <- merge(LSOA, pop, by.x="LSOA11CD", by.y="LSOA Code")
+
+# Read in occupancy of bedrooms Census data 
+occupancy <- read.csv("C:\\Users\\medsleea\\OneDrive - University of Leeds\\ONS Local Data Spaces Project\\R Data\\ONS\\occupancy.csv")
+# set column names for ease of use 
+colnames(occupancy)=c("date","LSOA Name","LSOA Code", "Rural/Urban", "Occ_All", "Occ_2+", "Occ_1+", "Occ_0", "Occ_-1", "Occ_-2+")
+# Calculate % of bedrooms overcrowded 
+occupancy$overcrowded <- ((occupancy$`Occ_-2+`+occupancy$`Occ_-1`)/occupancy$Occ_All) * 100 #use to map overcrowding vs Test and Positivity Rate
+
+# Remove duplicates from LA File
+LA<-LA[!duplicated(LA$LSOA11CD), ]
+# Join on LA Name and Code 
+LSOA <- merge(LSOA, LA, by.x="LSOA11CD", by.y="LSOA11CD")
+
+# Subset overall data to just Leeds for TESTING
+Leeds <- LSOA[LSOA$'LAD17NM'=="Leeds",] # subset to Leeds
+
+# Join on occupancy data
+Leeds <- merge(Leeds, occupancy, by.x="LSOA11CD", by.y="LSOA Code")
+# Join on AHAH (will subset to keep only useful variables)
+Leeds <- merge(Leeds,AHAH, by.x="LSOA11CD", by.y="lsoa11cd")
+# Join on IMD (will subset to keep only useful variables)
+Leeds <- merge(Leeds,IMD, by.x="LSOA11CD", by.y="lsoa11cd")
+# Join on IUC (will subset to keep only useful variables)
+Leeds <- merge(Leeds,IUC, by.x="LSOA11CD", by.y="lsoa11cd")
+
+# Tidy
+rm(AHAH, IMD, IUC, LSOA, occupancy, pop,LA)
+
+```
+
+## Biscale Package for Bi-Variate Map of AHAH vs IMD 
+```{r}
+# Create classes of IMD vs AHAH 
+data <- bi_class(Leeds, x=IMDScore, y=ahah, style="quantile", dim=3)
+# create Map
+p <- ggplot() +
+  geom_sf(data = data, mapping = aes(fill = bi_class), color = "white", size = 0.1, show.legend = FALSE) +
+  bi_scale_fill(pal = "GrPink", dim = 3) +
+  labs(
+    title = "AHAH and IMD in Leeds", caption="Bivariate map of IMD and AHAH."
+  ) +
+  bi_theme(base_family="sans", base_size=20)
+
+# Create legend
+legend <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "IMD",
+                    ylab = "AHAH",
+                    size = 7)
+
+# Combine map with legend using cowplot
+finalPlot <- ggdraw() +
+  draw_plot(p, 0, 0, 1, 1) +
+  draw_plot(legend, 0.05, 0.05, 0.2, 0.2)
+
+# Print map
+finalPlot
+```
+
+
+## Biscale Package for Bi-Variate Map of Pop per km vs IMD 
+```{r}
+# Create classes of IMD vs AHAH 
+data <- bi_class(Leeds, x=IMDScore, y='People per Sq Km', style="quantile", dim=3)
+# create Map
+p <- ggplot() +
+  geom_sf(data = data, mapping = aes(fill = bi_class), color = "white", size = 0.1, show.legend = FALSE) +
+  bi_scale_fill(pal = "GrPink", dim = 3) +
+  labs(
+    title = "People per Sq Km and IMD in Leeds", caption="Bivariate map of IMD and Population per Sq Km."
+  ) +
+  bi_theme(base_family="sans", base_size=20)
+
+# Create legend
+legend <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "IMD",
+                    ylab = "Pop Density",
+                    size = 7)
+
+# Combine map with legend using cowplot
+finalPlot <- ggdraw() +
+  draw_plot(p, 0, 0, 1, 1) +
+  draw_plot(legend, 0.05, 0.05, 0.2, 0.2)
+
+# Print map
+finalPlot
+```
+
+
+## Biscale Package for Bi-Variate Map of Overcrowding vs IMD
+```{r}
+# Create classes of IMD vs overcrowding
+data <- bi_class(Leeds, x=IMDScore, y=overcrowded, style="quantile", dim=3)
+# create Map
+p <- ggplot() +
+  geom_sf(data = data, mapping = aes(fill = bi_class), color = "white", size = 0.1, show.legend = FALSE) +
+  bi_scale_fill(pal = "GrPink", dim = 3) +
+  labs(
+    title = "IMD and Overcrowding in Leeds", caption="Bivariate map of IMD and Overcrowding."
+  ) +
+  bi_theme(base_family="sans", base_size=20)
+
+# Create legend
+legend <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "IMD",
+                    ylab = "Overcrowding",
+                    size = 7)
+
+# Combine map with legend using cowplot
+finalPlot <- ggdraw() +
+  draw_plot(p, 0, 0, 1, 1) +
+  draw_plot(legend, 0.05, 0.05, 0.2, 0.2)
+
+# Print map
+finalPlot
+```
+
+
+## Biscale Package for Bi-Variate Map of IUC vs IMD 
+```{r}
+# Create classes of IMD vs overcrowding
+data <- bi_class(Leeds, x=IMDScore, y=GRP_CD, style="quantile", dim=3)
+# create Map
+p <- ggplot() +
+  geom_sf(data = data, mapping = aes(fill = bi_class), color = "white", size = 0.1, show.legend = FALSE) +
+  bi_scale_fill(pal = "GrPink", dim = 3) +
+  labs(
+    title = "IMD and IUC in Leeds", caption="Bivariate map of IMD and IUC."
+  ) +
+  bi_theme(base_family="sans", base_size=20)
+
+# Create legend
+legend <- bi_legend(pal = "GrPink",
+                    dim = 3,
+                    xlab = "IMD",
+                    ylab = "Overcrowding",
+                    size = 7)
+
+# Combine map with legend using cowplot
+finalPlot <- ggdraw() +
+  draw_plot(p, 0, 0, 1, 1) +
+  draw_plot(legend, 0.05, 0.05, 0.2, 0.2)
+
+# Print map
+finalPlot
+```
+
+
+# Indirect Standardisation Example 
+```{r}
+# dummy dataset created
+dummy <- data.frame(Age_Group=c("0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"), LA_Deaths_men=c(4,2,5,6,125,350,14,52,9), LA_Population_men=c(14555,13021,30515,23050,12455,10202,64641,10101,3305), LSOA_Deaths_men=c(0,4,4,5,7,0,10,29,34), LSOA_Population_men=c(430, 343,405,805,779,544,120,240,111))
+
+# Male Crude Mortality Rate for LSOA 
+mort_LSOA <- (sum(dummy$LSOA_Deaths_men)/(sum(dummy$LSOA_Population_men)))
+# Male Crude Mortality Rate for LA 
+mort_LA <- (sum(dummy$LA_Deaths_men)/ (sum(dummy$LA_Population_men)))
+# Male Crude Mortality Rate (per 1000)
+mort_LA1000<- mort_LA *1000
+mort_LSOA
+mort_LA
+mort_LA1000
+```
+
+## Age-Specific Mortality Rates (per 1000)
+```{r}
+# LA Deaths of X age group / LA Population of X age group 
+dummy$LA_age_mort <- dummy$LA_Deaths_men/dummy$LA_Population_men
+```
+
+## Expected Deaths in LSOA 
+```{r}
+# Calculated age-specific rate * LSOA population of X age group
+dummy$LSOA_exp_mort <- dummy$LA_age_mort * dummy$LSOA_Population_men
+```
+
+## Standardised Mortality Rate 
+```{r}
+# Sum of Deaths LSOA / sum(Expected Deaths for LSOA)
+LSOA_SMR <- (sum(dummy$LSOA_Deaths_men))/sum(dummy$LSOA_exp_mort)
+# SMR * 100 gives % (ie 123, would be 23% higher than expected)
+perc_LSOA_SMR<-LSOA_SMR * 100
+perc_LSOA_SMR
+```
+
+## Age-Adjusted Mortality Rate for LSOA 
+```{r}
+# Standardised Mortality Rate * Crude Mortality rate of LA per 1000
+AA_Mort_LSOA<-LSOA_SMR * mort_LA*1000
+# LA Mortality
+mort_LA1000
+# So we would expect about 10 deaths per 1000 population, as 3 times higher!
+AA_Mort_LSOA
+```
+
+
+
+# Lists and LAPPLY Tutorial 
+```{r}
+
+
+
+
+
+
+
