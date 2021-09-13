@@ -26,7 +26,21 @@ server<- function(input, output, session) {
         s = input$x1_rows_all
         write.csv(mtcars2[s, , drop = FALSE], file)
     })
-    
+
+
+# Downloadable csv of selected dataset when the data is already a reactive RenderTable ----
+   output$downloadData <- downloadHandler(
+
+  filename = function() {
+    ('test.csv')
+  }, 
+
+  content = function(con) {
+    write.table(dataTable,row.names = FALSE,col.names=T, sep=",",con)
+  },
+  contentType="csv"
+)
+
 }
 
 shinyApp(ui=ui, server=server)
