@@ -1,7 +1,11 @@
-# Sam Stuff 
+# For Digitising Images into a geometry that can be used as a map
 
 library(digitize)
+library(dplyr)
 library(ggplot2)
+library(raster)
+library(sp)
+library(sf)
 
 #### Functions (RUN BEFORE YOU RUN CODE ABOVE) ####
 ### Rbind fill with NA from : https://www.r-bloggers.com/2012/06/dont-recycle-me/ ###
@@ -218,29 +222,51 @@ cbind.na <- function (..., deparse.level = 1)
 
 #### READ IN IMAGE ####
 # Read in the image and plot the corners of the image (make sure to click in all 4 corners of the image for this section)
-cal = ReadAndCal('Picture 1.jpg')
+print("please click in all corners of the plot, then click finish!")
+cal = ReadAndCal('teeth_diagram.png')
 
-#### WHILE LOOP, KEEP GOING UNTIL YOU TYPE N ####
+#### WHILE LOOP, KEEP GOING ON DIGITISING UNTIL YOU TYPE N ####
+
 # While loop, digitise that tooth and then create a polygon
 teeth_string<-"y"
 i=1
+
+polygons_list = list()
+
 while (teeth_string=="y") {
+  
   # Digitise the points along the tooth 
   data.points = DigitData(col = 'red')
-  df = data.frame(data.points)
-  # Calibrate on same scale as all other points
-  # df = Calibrate(data.points, cal, 10, 0, 10, 0)
-  df$teeth <- i
-  if (!exists("points_store")) { 
-    points_store <- df
-  } else { 
-    points_store <- rbind.na(points_store, df)
-  }
+
+  # create Polygons geometry and append to polygons_list
+  xy <- data.frame(data.points)
+  p <- Polygon(xy)
+  ps <- Polygons(list(p), ID=i)
+  polygons_list[i] <- ps
+  
+  # Read if user still wants to digitise more objects
   teeth_string <- readline(prompt="More teeth to digitise? (y/n)")
   i = i+1
 }
 
-# Plot the polygons, with a different colour for teeth to check it works (update this to include the values you generate)
-ggplot(points_store) + geom_polygon(aes(x=x,y=y,alpha=0.3,fill=as.factor(teeth)), color="black")
-# Create polygons and turn into a shapefile 
 
+
+# create spatial dataframe and save
+sps <- SpatialPolygons(polygons_list)
+
+data <- data.frame(ID=1:length(polygons_list)) ### data goes here - currently a placeholder ###
+
+# Convert to spatial Dataframe 
+spdf <- SpatialPolygonsDataFrame(sps, data)
+# Save as shapefile
+shapefile(x=spdf, file="~/Desktop/mouth_map", overwrite=TRUE)
+
+# Remove objects and current plots
+rm(cal, data, data.points, p, polygons_list, ps, spdf, sps, xy, i, teeth_string)
+dev.off()
+
+# Read back in shapefile to check it works
+x<- st_read(dsn="~/Desktop", layer="mouth_map")
+
+# Plot shapefile
+ggplot(data=x) + geom_sf(aes(fill=as.factor(ID))) + theme_minimal() + theme(axis.text = element_blank(), panel.grid = element_blank())
